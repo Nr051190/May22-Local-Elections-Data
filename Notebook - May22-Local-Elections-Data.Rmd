@@ -12,3 +12,30 @@ require(tidyverse)
 require(haven)
 require(labelled)
 ```
+
+```{r Load in the data}
+
+May_22_Local_Election_Results <- read.csv("2022 local election results (Britain Elects aggregate) - results.csv")
+
+```
+
+```{r Manipulate the data}
+#-------- My first thought is to see how unifying the centre left and left parties would affect the results
+#-------- To do this, I sum the votes collected by Labour, Lib Dem and Green
+#-------- Not every Lib Dem or Green vote will go to Labour. I pick an arbritary 65% and 80%, respectively, and assume the rest go to the Conservatives
+
+May_22_Local_Election_Results_Modified <- May_22_Local_Election_Results %>%
+  rowwise() %>%
+  mutate(Progressive_Party = sum(Lab,LDem*0.65,Grn*0.80,na.rm = T)) %>%
+  mutate(New_Con = sum(Con,LDem*0.35,Grn*0.20,na.rm = T)) %>%
+  mutate(New_Winner = case_when(Progressive_Party > Con ~ "PP",
+                                Con > Progressive_Party ~ "Con",
+                                Progressive_Party == Con ~ "Tie",
+                                TRUE ~ "Other")) %>%
+  ungroup() %>%
+  mutate(Centre_Left_Original_Win = sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn")) %>%
+  mutate(ConWin = sum(First.placed.party == "Con")) %>%
+  mutate()
+
+```
+
