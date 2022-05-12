@@ -1,0 +1,14 @@
+---
+title: "May22 Local Election Results"
+output: 
+code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load Packages, message=FALSE}
+require(parallel)
+require(tidyverse)
+require(haven)
+require(labelled)
+```
