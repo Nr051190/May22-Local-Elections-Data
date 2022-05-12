@@ -11,6 +11,9 @@ require(parallel)
 require(tidyverse)
 require(haven)
 require(labelled)
+require(tmap)
+require(sf)
+require(tmaptools)
 ```
 
 ```{r Load in the data}
@@ -20,23 +23,58 @@ May_22_Local_Election_Results <- read.csv("2022 local election results (Britain 
 ```
 
 ```{r Manipulate the data}
+
+# We can create a quick list of column names for the relevant parties, appending some additional variables 
+listofcolumnnames <- colnames(May_22_Local_Election_Results[,11:20])
+listofcolumnnames <- append(listofcolumnnames, c("Progressive_Party","New_Con"))
+
 #-------- My first thought is to see how unifying the centre left and left parties would affect the results
 #-------- To do this, I sum the votes collected by Labour, Lib Dem and Green
 #-------- Not every Lib Dem or Green vote will go to Labour. I pick an arbritary 65% and 80%, respectively, and assume the rest go to the Conservatives
 
 May_22_Local_Election_Results_Modified <- May_22_Local_Election_Results %>%
   rowwise() %>%
-  mutate(Progressive_Party = sum(Lab,LDem*0.70,Grn*0.80,na.rm = T)) %>%
-  mutate(New_Con = sum(Con,LDem*0.30,Grn*0.20,na.rm = T)) %>%
-  mutate(New_Winner = case_when(Progressive_Party > Con ~ "PP",
-                                Con > Progressive_Party ~ "Con",
-                                Progressive_Party == Con ~ "Tie",
-                                TRUE ~ "Other")) %>%
+  mutate(across(9:20,~replace_na(.x,0))) %>%
+  mutate(Progressive_Party = sum(Lab,LDem*0.75,Grn*0.90,na.rm = T)) %>%
+  mutate(New_Con = sum(Con,LDem*0.20,Grn*0.5,na.rm = T)) %>%
+  mutate(New_Winner = max(c(paste(listofcolumnnames))[which.max(c(SNP,PC,TUSC,Ref,Reg,UKIP,Ind,IndGrp,Res,Oth,Progressive_Party,New_Con))])) %>%
   ungroup() %>%
   mutate(Centre_Left_Original_Win = sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn")) %>%
   mutate(ConWin = sum(First.placed.party == "Con")) %>%
-  mutate(Gains_Made_By_PP = sum(New_Winner == "PP") - Centre_Left_Original_Win) %>%
-  mutate(Gains_Made_By_Con = sum(New_Winner == "Con") - ConWin)
+  mutate(Gains_Made_By_PP = sum(New_Winner == "Progressive_Party") - Centre_Left_Original_Win) %>%
+  mutate(Gains_Made_By_Con = sum(New_Winner == "New_Con") - ConWin) %>%
+  group_by(Region) %>%
+  mutate(Region_Centre_Left_Original_Win = sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn")) %>%
+  mutate(Region_ConWin = sum(First.placed.party == "Con")) %>%
+  mutate(Region_Gains_Made_By_PP = sum(New_Winner == "Progressive_Party") - (sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn"))) %>%
+  mutate(Region_Gains_Made_By_Con = sum(New_Winner == "New_Con") - sum(First.placed.party == "Con")) %>%
+  ungroup()
+
+May_22_Local_Election_Results_Modified_Regional <- May_22_Local_Election_Results_Modified %>%
+  filter(!duplicated(Region)) %>%
+  select(Region,Region_Gains_Made_By_PP,Region_Gains_Made_By_Con)
 
 ```
+
+```{r}
+
+MSOA<-st_read("/Users/nasirrajah/Downloads/infuse_msoa_lyr_2011_clipped",stringsAsFactors=F)
+
+Boundaries <- rgdal::readOGR(dsn = "/Users/nasirrajah/Downloads/infuse_msoa_lyr_2011_clipped")
+simplifiedBoundaries <-rmapshaper::ms_simplify(Boundaries)
+
+# Map MSOA to local regions
+MSOARegions<-read.csv("RegionsMSOA.csv",header = T)
+
+May_22_Local_Election_Results_Modified_Regional$Region=MSOARegions$RGN11NM[match(May_22_Local_Election_Results_Modified_Regional$Region,MSOARegions$RGN11NM)]
+May_22_Local_Election_Results_Modified_Regional$geo_label<-May_22_Local_Election_Results_Modified_Regional$Region
+
+Joined<-inner_join(MSOA,May_22_Local_Election_Results_Modified_Regional)
+
+
+# Map it - takes a while - tm_polygons is the variable you want to map and id is your geographical information
+tm_shape(Joined) + tm_polygons("Region_Gains_Made_By_PP", id = "geo_label", border.alpha = 0.2,title = "", legend.hist = T,palette = get_brewer_pal(palette = "RdYlBu", n= 6, plot = T))+ tm_layout(main.title ="",main.title.position = "center",panel.label.size = 0.8, panel.label.fontface = "bold",title.fontface = "bold", legend.outside = T, bg.color = "transparent")
+
+```
+
 
