@@ -14,6 +14,7 @@ require(labelled)
 require(tmap)
 require(sf)
 require(tmaptools)
+require(tidylog)
 ```
 
 ```{r Load in the data}
@@ -30,11 +31,10 @@ listofcolumnnames <- append(listofcolumnnames, c("Progressive_Party","New_Con"))
 
 #-------- My first thought is to see how unifying the centre left and left parties would affect the results
 #-------- To do this, I sum the votes collected by Labour, Lib Dem and Green
-#-------- Not every Lib Dem or Green vote will go to Labour. I pick an arbritary 65% and 80%, respectively, and assume the rest go to the Conservatives
+#-------- Not every Lib Dem or Green vote will go to Labour. I pick  arbitrary values and assume the rest either go to Con or don't vote
 
 May_22_Local_Election_Results_Modified <- May_22_Local_Election_Results %>%
   rowwise() %>%
-  mutate(across(9:20,~replace_na(.x,0))) %>%
   mutate(Progressive_Party = sum(Lab,LDem*0.75,Grn*0.90,na.rm = T)) %>%
   mutate(New_Con = sum(Con,LDem*0.20,Grn*0.5,na.rm = T)) %>%
   mutate(New_Winner = max(c(paste(listofcolumnnames))[which.max(c(SNP,PC,TUSC,Ref,Reg,UKIP,Ind,IndGrp,Res,Oth,Progressive_Party,New_Con))])) %>%
@@ -43,20 +43,56 @@ May_22_Local_Election_Results_Modified <- May_22_Local_Election_Results %>%
   mutate(ConWin = sum(First.placed.party == "Con")) %>%
   mutate(Gains_Made_By_PP = sum(New_Winner == "Progressive_Party") - Centre_Left_Original_Win) %>%
   mutate(Gains_Made_By_Con = sum(New_Winner == "New_Con") - ConWin) %>%
+  mutate(Lab_Distance_To_Con = Lab - Con) %>%
   group_by(Region) %>%
   mutate(Region_Centre_Left_Original_Win = sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn")) %>%
   mutate(Region_ConWin = sum(First.placed.party == "Con")) %>%
   mutate(Region_Gains_Made_By_PP = sum(New_Winner == "Progressive_Party") - (sum(First.placed.party == "Lab") + sum(First.placed.party == "LDem") + sum(First.placed.party == "Grn"))) %>%
   mutate(Region_Gains_Made_By_Con = sum(New_Winner == "New_Con") - sum(First.placed.party == "Con")) %>%
+  mutate(Regional_Lab_Distance_To_Con = sum(Lab, na.rm = T) - sum(Con, na.rm = T)) %>%
+  ungroup() %>%
+  group_by(Local.authority) %>%
+  mutate(LA_Lab_Distance_To_Con = sum(Lab, na.rm = T) - sum(Con, na.rm = T)) %>%
   ungroup()
-
+  
+# Create a DF that provides regional info 
 May_22_Local_Election_Results_Modified_Regional <- May_22_Local_Election_Results_Modified %>%
   filter(!duplicated(Region)) %>%
-  select(Region,Region_Gains_Made_By_PP,Region_Gains_Made_By_Con)
+  select(Region,Region_Gains_Made_By_PP,Region_Gains_Made_By_Con,Regional_Lab_Distance_To_Con)
 
 ```
 
-```{r}
+```{r Add in local authority level income deprivation data}
+# I could have continued piping on the dataset above, but it may become unwieldy and it's nice to split it up
+
+# This data is extracted from the ONS website
+Local_authority_level_deprivation <- read.csv("localincomedeprivationdata.csv",header = T) %>%
+  rename(Local.authority = Local.Authority.District.name..2019.)
+
+# Joining the local deprivation data with the modified May 22 election data - it creates NAs as some local authorities did not vote. I have removed these
+May_22_Local_Election_Results_Modified_With_IncomeDep <- May_22_Local_Election_Results_Modified %>%
+  full_join(., Local_authority_level_deprivation, by = "Local.authority") %>% 
+  filter(!is.na(Ward)) %>%
+  mutate(Inverted_Income.deprivation.rate.ranking = max(Income.deprivation.rate.ranking,na.rm = T) - (Income.deprivation.rate.ranking - 1))
+
+```
+
+```{r Quick LM of voting gap for labour by deprivation}
+
+Labour_To_Con_Voting_Gap <- lm(LA_Lab_Distance_To_Con ~ Income.deprivation.rate.quintile, data = May_22_Local_Election_Results_Modified_With_IncomeDep)
+
+May_22_Local_Election_Results_Modified_With_IncomeDep %>%
+  modelr::add_predictions(Labour_To_Con_Voting_Gap) %>%
+  modelr::add_residuals(Labour_To_Con_Voting_Gap) %>%
+  ggplot(aes(x = Income.deprivation.rate.quintile, y = resid)) + geom_point(color = "red") 
+
+
+  + geom_point(aes(x = Inverted_Income.deprivation.rate.ranking, y = resid), colour = "blue")
+
+```
+
+
+```{r Beginning of mapping}
 
 MSOA<-st_read("/Users/nasirrajah/Downloads/infuse_msoa_lyr_2011_clipped",stringsAsFactors=F)
 
